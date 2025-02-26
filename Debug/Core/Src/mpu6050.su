@@ -1,0 +1,4 @@
+../Core/Src/mpu6050.c:19:6:MPU6050_Init	40	static
+../Core/Src/mpu6050.c:35:6:MPU6050_Read_Accel_Gyro	72	static
+../Core/Src/mpu6050.c:55:6:MPU6050_Read_Accel_Gyro_DMA	24	static
+../Core/Src/mpu6050.c:61:6:HAL_I2C_MemRxCpltCallback	56	static
