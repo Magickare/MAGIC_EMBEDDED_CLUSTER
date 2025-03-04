@@ -17,9 +17,9 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
-#include "main.h"
 #include "mpu6050.h"
 #include <stdio.h>
+#include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -47,6 +47,7 @@ DMA_HandleTypeDef hdma_i2c1_rx;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 #define MPU6050_ADDR  0xD0
@@ -54,7 +55,8 @@ DMA_HandleTypeDef hdma_usart2_tx;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-
+int16_t accel_x, accel_y, accel_z;
+int16_t gyro_x, gyro_y, gyro_z;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,9 +72,15 @@ static void MX_I2C1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 int _write(int file, char *ptr, int len) {
-HAL_UART_Transmit(&huart2, (uint8_t*) ptr, len, HAL_MAX_DELAY);
-return len;
+    HAL_UART_Transmit(&huart2, (uint8_t*) ptr, len, HAL_MAX_DELAY);
+    return len;
 }
+
+/*void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
+    if (hi2c->Instance == I2C1) {
+        dma_complete = 1; // Set flag for main loop processing
+    }
+}*/
 
 /*void MPU6050_Init() {
     uint8_t check, data;
@@ -95,7 +103,7 @@ return len;
     } else {
         printf("I2C Read Error: MPU6050 not responding!\r\n");
     }
-}*/
+}
 
 void MPU6050_ReadData() {
     uint8_t data_buffer[6];
@@ -112,6 +120,7 @@ void MPU6050_ReadData() {
         printf("Error: I2C Read Failed!\r\n");
     }
 }
+*/
 
 /* USER CODE END 0 */
 
@@ -119,50 +128,59 @@ void MPU6050_ReadData() {
   * @brief  The application entry point.
   * @retval int
   */
-int main(void)
-{
+int main(void) {
+    /* MCU Configuration */
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_USART2_UART_Init();
+    MX_I2C1_Init();
 
-  /* USER CODE BEGIN 1 */
+    /* Initialize MPU6050 */
+    MPU6050_Init(&hi2c1);
+    HAL_Delay(1000);
 
-  /* USER CODE END 1 */
+    /* Start the first DMA read */
+    if (HAL_I2C_Mem_Read_DMA(&hi2c1, MPU6050_ADDR, ACCEL_XOUT_H, 1, mpu_data, 14) != HAL_OK) {
+        printf("Error: Initial DMA Start Failed!\r\n");
+    }
 
-  /* MCU Configuration--------------------------------------------------------*/
+    while (1) {
+        if (dma_complete) {
+            dma_complete = 0; // Reset flag
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+            // Process received data
+            int16_t accel_x = (int16_t)(mpu_data[0] << 8 | mpu_data[1]);
+            int16_t accel_y = (int16_t)(mpu_data[2] << 8 | mpu_data[3]);
+            int16_t accel_z = (int16_t)(mpu_data[4] << 8 | mpu_data[5]);
+            int16_t gyro_x = (int16_t)(mpu_data[8] << 8 | mpu_data[9]);
+            int16_t gyro_y = (int16_t)(mpu_data[10] << 8 | mpu_data[11]);
+            int16_t gyro_z = (int16_t)(mpu_data[12] << 8 | mpu_data[13]);
 
-  /* USER CODE BEGIN Init */
+            printf("DMA Accel X: %d, Y: %d, Z: %d | Gyro X: %d, Y: %d, Z: %d\r\n",
+                   accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
 
-  /* USER CODE END Init */
+            // Ensure I2C is ready before restarting DMA
+            while (HAL_I2C_GetState(&hi2c1) != HAL_I2C_STATE_READY);
 
-  /* Configure the system clock */
-  SystemClock_Config();
+            // Restart the DMA transfer
+            if (HAL_I2C_Mem_Read_DMA(&hi2c1, MPU6050_ADDR, ACCEL_XOUT_H, 1, mpu_data, 14) != HAL_OK) {
+                printf("Error: Failed to restart DMA! Resetting I2C...\r\n");
 
-  /* USER CODE BEGIN SysInit */
+                // Manually reset I2C if stuck
+                HAL_I2C_DeInit(&hi2c1);
+                HAL_Delay(10);
+                HAL_I2C_Init(&hi2c1);
 
-  /* USER CODE END SysInit */
+                // Retry DMA restart
+                if (HAL_I2C_Mem_Read_DMA(&hi2c1, MPU6050_ADDR, ACCEL_XOUT_H, 1, mpu_data, 14) != HAL_OK) {
+                    printf("Error: DMA Restart Failed Again!\r\n");
+                }
+            }
+        }
+    }
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_USART2_UART_Init();
-  MX_I2C1_Init();
-  /* USER CODE BEGIN 2 */
-  MPU6050_Init(&hi2c1);
-  MPU6050_Read_Accel_Gyro_DMA(&hi2c1);
-  HAL_Delay(1000);
-
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-  }
-  /* USER CODE END 3 */
 }
 
 /**
@@ -291,6 +309,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
   /* DMA1_Stream6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
