@@ -1,0 +1,12 @@
+../Core/Src/main.c:58:6:MPU6050_Init	32	static
+../Core/Src/main.c:70:6:MPU6050_Read	16	static
+../Core/Src/main.c:81:6:HAL_I2C_MemRxCpltCallback	216	static
+../Core/Src/main.c:107:5:main	72	static
+../Core/Src/main.c:142:6:SystemClock_Config	88	static
+../Core/Src/main.c:179:13:MX_I2C1_Init	8	static
+../Core/Src/main.c:200:13:MX_USART2_UART_Init	8	static
+../Core/Src/main.c:220:13:MX_DMA_Init	16	static
+../Core/Src/main.c:236:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:264:6:StartDefaultTask	16	static
+../Core/Src/main.c:273:6:StartMPU6050Task	16	static
+../Core/Src/main.c:286:6:Error_Handler	4	static,ignoring_inline_asm
