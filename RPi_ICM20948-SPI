@@ -1,0 +1,179 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <fcntl.h>      // open()
+#include <unistd.h>     // close(), usleep()
+#include <sys/ioctl.h>  // ioctl()
+#include <linux/spi/spidev.h> // SPI ioctl commands
+
+// Device specific constants - adjust if needed
+#define SPI_DEVICE      "/dev/spidev0.0"
+#define SPI_MODE        SPI_MODE_0
+#define SPI_SPEED       1000000    // 1 MHz
+#define BITS_PER_WORD   8
+
+// MPU6050 Register Addresses (SPI communication)
+// Note: Register addresses based on MPU6050 datasheet
+#define WHO_AM_I        0x75
+#define PWR_MGMT_1      0x6B
+#define ACCEL_XOUT_H    0x3B
+#define ACCEL_XOUT_L    0x3C
+#define ACCEL_YOUT_H    0x3D
+#define ACCEL_YOUT_L    0x3E
+#define ACCEL_ZOUT_H    0x3F
+#define ACCEL_ZOUT_L    0x40
+#define GYRO_XOUT_H     0x43
+#define GYRO_XOUT_L     0x44
+#define GYRO_YOUT_H     0x45
+#define GYRO_YOUT_L     0x46
+#define GYRO_ZOUT_H     0x47
+#define GYRO_ZOUT_L     0x48
+
+// Initialize SPI and return file descriptor or -1 on failure
+int spi_init() {
+    int spi_fd = open(SPI_DEVICE, O_RDWR);
+    if (spi_fd < 0) {
+        perror("Failed to open SPI device");
+        return -1;
+    }
+
+    uint8_t mode = SPI_MODE;
+    if (ioctl(spi_fd, SPI_IOC_WR_MODE, &mode) == -1) {
+        perror("Failed to set SPI mode");
+        close(spi_fd);
+        return -1;
+    }
+
+    uint32_t speed = SPI_SPEED;
+    if (ioctl(spi_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) == -1) {
+        perror("Failed to set SPI speed");
+        close(spi_fd);
+        return -1;
+    }
+
+    uint8_t bits = BITS_PER_WORD;
+    if (ioctl(spi_fd, SPI_IOC_WR_BITS_PER_WORD, &bits) == -1) {
+        perror("Failed to set SPI bits per word");
+        close(spi_fd);
+        return -1;
+    }
+
+    return spi_fd;
+}
+
+// Read one byte from the given register via SPI
+uint8_t spi_read_register(int spi_fd, uint8_t reg_addr) {
+    uint8_t tx_buffer[2];
+    uint8_t rx_buffer[2];
+
+    // For MPU6050 SPI, MSB=1 means read operation
+    tx_buffer[0] = reg_addr | 0x80; // Set MSB for read
+    tx_buffer[1] = 0x00;             // Dummy byte for clocking data
+
+    struct spi_ioc_transfer transfer = {
+        .tx_buf = (unsigned long)tx_buffer,
+        .rx_buf = (unsigned long)rx_buffer,
+        .len = 2,
+        .speed_hz = SPI_SPEED,
+        .bits_per_word = BITS_PER_WORD,
+        .delay_usecs = 0,
+    };
+
+    if (ioctl(spi_fd, SPI_IOC_MESSAGE(1), &transfer) < 0) {
+        perror("Failed to read from register");
+        return 0xFF; // Indicate error
+    }
+
+    return rx_buffer[1]; // Second byte is register data
+}
+
+// Write one byte to the given register via SPI
+int spi_write_register(int spi_fd, uint8_t reg_addr, uint8_t data) {
+    uint8_t tx_buffer[2];
+
+    // MSB=0 means write operation for MPU6050 SPI
+    tx_buffer[0] = reg_addr & 0x7F; // Clear MSB for write
+    tx_buffer[1] = data;
+
+    struct spi_ioc_transfer transfer = {
+        .tx_buf = (unsigned long)tx_buffer,
+        .rx_buf = 0,
+        .len = 2,
+        .speed_hz = SPI_SPEED,
+        .bits_per_word = BITS_PER_WORD,
+        .delay_usecs = 0,
+    };
+
+    if (ioctl(spi_fd, SPI_IOC_MESSAGE(1), &transfer) < 0) {
+        perror("Failed to write to register");
+        return -1;
+    }
+
+    return 0; // Success
+}
+
+// Read accelerometer and gyro raw data and print values
+void read_imu_data(int spi_fd) {
+    // Read accelerometer registers
+    uint8_t accel_xh = spi_read_register(spi_fd, ACCEL_XOUT_H);
+    uint8_t accel_xl = spi_read_register(spi_fd, ACCEL_XOUT_L);
+    uint8_t accel_yh = spi_read_register(spi_fd, ACCEL_YOUT_H);
+    uint8_t accel_yl = spi_read_register(spi_fd, ACCEL_YOUT_L);
+    uint8_t accel_zh = spi_read_register(spi_fd, ACCEL_ZOUT_H);
+    uint8_t accel_zl = spi_read_register(spi_fd, ACCEL_ZOUT_L);
+
+    // Combine high and low bytes
+    int16_t accel_x = (int16_t)((accel_xh << 8) | accel_xl);
+    int16_t accel_y = (int16_t)((accel_yh << 8) | accel_yl);
+    int16_t accel_z = (int16_t)((accel_zh << 8) | accel_zl);
+
+    printf("Acceleration X: %d, Y: %d, Z: %d\n", accel_x, accel_y, accel_z);
+
+    // Read gyroscope registers
+    uint8_t gyro_xh = spi_read_register(spi_fd, GYRO_XOUT_H);
+    uint8_t gyro_xl = spi_read_register(spi_fd, GYRO_XOUT_L);
+    uint8_t gyro_yh = spi_read_register(spi_fd, GYRO_YOUT_H);
+    uint8_t gyro_yl = spi_read_register(spi_fd, GYRO_YOUT_L);
+    uint8_t gyro_zh = spi_read_register(spi_fd, GYRO_ZOUT_H);
+    uint8_t gyro_zl = spi_read_register(spi_fd, GYRO_ZOUT_L);
+
+    // Combine high and low bytes
+    int16_t gyro_x = (int16_t)((gyro_xh << 8) | gyro_xl);
+    int16_t gyro_y = (int16_t)((gyro_yh << 8) | gyro_yl);
+    int16_t gyro_z = (int16_t)((gyro_zh << 8) | gyro_zl);
+
+    printf("Gyro X: %d, Y: %d, Z: %d\n", gyro_x, gyro_y, gyro_z);
+}
+
+int main() {
+    // Initialize SPI interface
+    int spi_fd = spi_init();
+    if (spi_fd < 0) {
+        return -1; // Initialization failed
+    }
+
+    // Reset the MPU6050 device by writing 0x80 to PWR_MGMT_1
+    spi_write_register(spi_fd, PWR_MGMT_1, 0x80);
+    printf("Device reset command sent.\n");
+
+    // Small delay to allow reset
+    usleep(100000); // 100 ms
+
+    // Wake up the device by clearing the sleep bit (write 0x01 to PWR_MGMT_1)
+    spi_write_register(spi_fd, PWR_MGMT_1, 0x01);
+    printf("Device woken up from sleep.\n");
+
+    // Read and print WHO_AM_I register to verify communication
+    uint8_t who_am_i = spi_read_register(spi_fd, WHO_AM_I);
+    printf("WHO_AM_I register value: 0x%02X\n", who_am_i);
+
+    // Read sensor data multiple times
+    for (int i = 0; i < 2; i++) {
+        read_imu_data(spi_fd);
+        usleep(10000); // 10 ms delay between readings
+    }
+
+    // Close SPI device
+    close(spi_fd);
+
+    return 0;
+}
