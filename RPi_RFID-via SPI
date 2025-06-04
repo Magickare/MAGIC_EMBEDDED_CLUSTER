@@ -1,0 +1,82 @@
+#include <wiringPi.h>
+#include <wiringPiSPI.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#define SPI_CHANNEL 0
+#define SPI_SPEED 1000000
+
+#define COMMAND_REG 0x01
+#define BIT_FRAMING_REG 0x0D
+#define COMM_IRQ_REG 0x04
+#define FIFO_DATA_REG 0x09
+#define FIFO_LEVEL_REG 0x0A
+
+#define CMD_TRANSCEIVE 0x0C
+#define CMD_IDLE 0x00
+
+#define PICC_REQIDL 0x26
+#define PICC_ANTICOLL 0x93
+
+void write_register(uint8_t reg, uint8_t val) {
+    uint8_t buffer[2];
+    buffer[0] = (reg << 1) & 0x7E;
+    buffer[1] = val;
+    wiringPiSPIDataRW(SPI_CHANNEL, buffer, 2);
+}
+
+uint8_t read_register(uint8_t reg) {
+    uint8_t buffer[2];
+    buffer[0] = ((reg << 1) & 0x7E) | 0x80;
+    buffer[1] = 0;
+    wiringPiSPIDataRW(SPI_CHANNEL, buffer, 2);
+    return buffer[1];
+}
+
+void reset() {
+    write_register(COMMAND_REG, 0x0F);
+}
+
+void request_card() {
+    write_register(BIT_FRAMING_REG, 0x07);
+    write_register(COMMAND_REG, CMD_IDLE);
+    write_register(FIFO_LEVEL_REG, 0x80);
+    write_register(FIFO_DATA_REG, PICC_REQIDL);
+    write_register(COMMAND_REG, CMD_TRANSCEIVE);
+    write_register(BIT_FRAMING_REG, 0x87);
+    delay(1);
+}
+
+int anticollision(uint8_t *uid) {
+    write_register(BIT_FRAMING_REG, 0x00);
+    write_register(COMMAND_REG, CMD_IDLE);
+    write_register(FIFO_LEVEL_REG, 0x80);
+    write_register(FIFO_DATA_REG, PICC_ANTICOLL);
+    write_register(FIFO_DATA_REG, 0x20);
+    write_register(COMMAND_REG, CMD_TRANSCEIVE);
+    write_register(BIT_FRAMING_REG, 0x80);
+    delay(1);
+
+    for (int i = 0; i < 5; i++) {
+        uid[i] = read_register(FIFO_DATA_REG + i);
+    }
+    return 1; // success
+}
+
+int main() {
+    wiringPiSetup();
+    wiringPiSPISetup(SPI_CHANNEL, SPI_SPEED);
+
+    reset();
+
+    uint8_t uid[5];
+
+    while (1) {
+        request_card();
+        if (anticollision(uid)) {
+            // Card detected
+        }
+        delay(500);
+    }
+    return 0;
+}
